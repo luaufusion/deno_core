@@ -9,6 +9,7 @@ use super::transl8::FromV8;
 use super::transl8::ToV8;
 use super::v8slice::V8Slice;
 use crate::magic::transl8::impl_magic;
+use crate::v8_create_backing_store;
 
 pub struct JsBuffer(V8Slice<u8>);
 
@@ -118,9 +119,10 @@ impl ToV8 for ToJsBuffer {
           .into(),
       );
     }
+
     let buf_len: usize = buf.len();
-    let backing_store =
-      v8::ArrayBuffer::new_backing_store_from_boxed_slice(buf);
+    let backing_store = v8_create_backing_store(scope, &buf, buf_len);
+
     let backing_store_shared = backing_store.make_shared();
     let ab = v8::ArrayBuffer::with_backing_store(scope, &backing_store_shared);
     Ok(

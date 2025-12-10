@@ -28,7 +28,6 @@ use bytes::BytesMut;
 use libc::c_void;
 use std::borrow::Cow;
 use std::marker::PhantomData;
-use std::rc::Rc;
 
 use crate::cppgc::PrototypeChain;
 
@@ -361,22 +360,9 @@ to_v8_fallible!(serde_v8::JsBuffer: |value, scope| {
 });
 to_v8!(RustToV8Marker<ArrayBufferMarker, BytesMut>: |value, scope| {
   let value = value.0;
-  let ptr = value.as_ptr();
   let len = value.len() as _;
-  let rc = Rc::into_raw(Rc::new(value)) as *const c_void;
-
-  extern "C" fn drop_rc(_ptr: *mut c_void, _len: usize, data: *mut c_void) {
-    // SAFETY: We know that data is a raw Rc from above
-    unsafe { drop(Rc::<BytesMut>::from_raw(data as _)) }
-  }
-
-  // SAFETY: We are using the BytesMut backing store here
-  let backing_store_shared = unsafe {
-    v8::ArrayBuffer::new_backing_store_from_ptr(
-      ptr as _, len, drop_rc, rc as _,
-    )
-  }
-  .make_shared();
+  let backing_store = serde_v8::v8_create_backing_store(scope, &value, len);
+  let backing_store_shared = backing_store.make_shared();
   v8::ArrayBuffer::with_backing_store(scope, &backing_store_shared)
 });
 to_v8_fallible!(BytesMut: |buf, scope| {
@@ -393,7 +379,7 @@ macro_rules! typedarray {
         v8::ArrayBuffer::new(scope, 0)
       } else {
         let backing_store =
-          v8::ArrayBuffer::new_backing_store_from_bytes(buf);
+          serde_v8::v8_create_backing_store(scope, &buf, buf.len());
         let backing_store_shared = backing_store.make_shared();
         v8::ArrayBuffer::with_backing_store(scope, &backing_store_shared)
       }

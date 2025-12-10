@@ -3380,8 +3380,7 @@ dependencies = [
 [[package]]
 name = "v8"
 version = "142.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f566072bd76b2631d0dca1d90a766c943863b1fd6b01312281dc919816de976d"
+source = "git+https://github.com/luaufusion/rusty_v8?branch=luaufusion#75ba3331af8e953ef5c33b39684eff55720399af"
 dependencies = [
  "bindgen",
  "bitflags",

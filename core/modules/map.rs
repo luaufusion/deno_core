@@ -961,15 +961,15 @@ impl ModuleMap {
     let (buf_len, backing_store) = match code {
       ModuleCodeBytes::Static(bytes) => (
         bytes.len(),
-        v8::ArrayBuffer::new_backing_store_from_vec(bytes.to_vec()),
+        serde_v8::v8_create_backing_store(scope, &bytes, bytes.len()),
       ),
       ModuleCodeBytes::Boxed(bytes) => (
         bytes.len(),
-        v8::ArrayBuffer::new_backing_store_from_boxed_slice(bytes),
+        serde_v8::v8_create_backing_store(scope, &bytes, bytes.len()),
       ),
       ModuleCodeBytes::Arc(bytes) => (
         bytes.len(),
-        v8::ArrayBuffer::new_backing_store_from_vec(bytes.to_vec()),
+        serde_v8::v8_create_backing_store(scope, &bytes, bytes.len()),
       ),
     };
     let backing_store_shared = backing_store.make_shared();

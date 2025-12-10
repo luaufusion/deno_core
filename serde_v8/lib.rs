@@ -6,6 +6,7 @@ mod keys;
 mod magic;
 mod payload;
 mod ser;
+mod buffer;
 
 pub use de::Deserializer;
 pub use de::from_v8;
@@ -29,3 +30,4 @@ pub use magic::v8slice::V8Slice;
 pub use magic::v8slice::V8Sliceable;
 pub use ser::Serializer;
 pub use ser::to_v8;
+pub use buffer::v8_create_backing_store;

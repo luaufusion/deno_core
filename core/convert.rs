@@ -465,7 +465,7 @@ fn bytes_to_uint8array<'a>(
   buf: Vec<u8>,
 ) -> v8::Local<'a, v8::Value> {
   let len = buf.len();
-  let backing = v8::ArrayBuffer::new_backing_store_from_vec(buf);
+  let backing = serde_v8::v8_create_backing_store(scope, &buf, len);
   let backing_shared = backing.make_shared();
   let ab = v8::ArrayBuffer::with_backing_store(scope, &backing_shared);
   v8::Uint8Array::new(scope, ab, 0, len).unwrap().into()
@@ -563,7 +563,7 @@ macro_rules! typedarray_to_v8 {
           return Ok(v8::ArrayBuffer::new(scope, 0).into());
         }
         let bytes = self.0.into_boxed_slice();
-        let backing = v8::ArrayBuffer::new_backing_store_from_bytes(bytes);
+        let backing = serde_v8::v8_create_backing_store(scope, &bytes, len);
         let backing_shared = backing.make_shared();
         let ab = v8::ArrayBuffer::with_backing_store(scope, &backing_shared);
         v8::$v8ty::new(scope, ab, 0, len)

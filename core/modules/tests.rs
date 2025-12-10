@@ -907,7 +907,7 @@ fn test_custom_module_type_callback_synthetic() {
       ModuleSourceCode::String(str_) => str_.as_bytes().to_vec(),
     };
     let buf_len: usize = buf.len();
-    let backing_store = v8::ArrayBuffer::new_backing_store_from_vec(buf);
+    let backing_store = serde_v8::v8_create_backing_store(scope, &buf, buf_len);
     let backing_store_shared = backing_store.make_shared();
     let ab = v8::ArrayBuffer::with_backing_store(scope, &backing_store_shared);
     let uint8_array = v8::Uint8Array::new(scope, ab, 0, buf_len).unwrap();
@@ -991,7 +991,7 @@ fn test_custom_module_type_callback_computed() {
       ModuleSourceCode::String(str_) => str_.as_bytes().to_vec(),
     };
     let buf_len: usize = buf.len();
-    let backing_store = v8::ArrayBuffer::new_backing_store_from_vec(buf);
+    let backing_store = serde_v8::v8_create_backing_store(scope, &buf, buf_len);
     let backing_store_shared = backing_store.make_shared();
     let ab = v8::ArrayBuffer::with_backing_store(scope, &backing_store_shared);
     let uint8_array = v8::Uint8Array::new(scope, ab, 0, buf_len).unwrap();

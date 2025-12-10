@@ -21,6 +21,9 @@ smallvec = { workspace = true, features = ["union"] }
 thiserror.workspace = true
 v8.workspace = true
 
+[features]
+v8_enable_sandbox = []
+
 [dev-dependencies]
 bencher.workspace = true
 serde_bytes.workspace = true

@@ -420,7 +420,7 @@ pub fn op_encode<'s, 'i>(
   let bytes = text_str.into_bytes();
   let len = bytes.len();
   let backing_store =
-    v8::ArrayBuffer::new_backing_store_from_vec(bytes).make_shared();
+    serde_v8::v8_create_backing_store(scope, &bytes, len).make_shared();
   let buffer = v8::ArrayBuffer::with_backing_store(scope, &backing_store);
   let u8array = v8::Uint8Array::new(scope, buffer, 0, len).unwrap();
   Ok(u8array)
