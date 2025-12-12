@@ -519,7 +519,13 @@ impl<'a> FromV8<'a> for Uint8Array {
 }
 
 unsafe fn abview_to_vec<T>(ab_view: v8::Local<v8::ArrayBufferView>) -> Vec<T> {
+  if ab_view.byte_length() == 0 {
+    return Vec::with_capacity(0); // v8 sandbox quirk requires us to return a empty vec on
+                                  // byte_length 0
+  }
   let data = ab_view.data();
+  assert!(!data.is_null());
+  //println!("Pointer: 0x{:x}, Alignment of T: {}, len: {}", data as usize, std::mem::align_of::<T>(), ab_view.byte_length());
   let data = unsafe { data.add(ab_view.byte_offset()) };
   let len = ab_view.byte_length() / std::mem::size_of::<T>();
   let mut out = maybe_uninit_vec::<T>(len);

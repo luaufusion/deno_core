@@ -5,10 +5,10 @@ deno_ops_compile_test_runner::prelude!();
 use deno_core::cppgc::GarbageCollected;
 use deno_core::v8;
 use deno_error::JsErrorBox;
-use std::cell::Cell;
+use std::sync::atomic::AtomicU32;
 
 pub struct Foo {
-  x: Cell<u32>,
+  x: AtomicU32,
 }
 
 unsafe impl GarbageCollected for Foo {
@@ -32,20 +32,20 @@ impl Foo {
   #[cppgc]
   pub fn constructor(x: Option<u32>) -> Foo {
     Foo {
-      x: Cell::new(x.unwrap_or_default()),
+      x: AtomicU32::new(x.unwrap_or_default()),
     }
   }
 
   #[fast]
   #[getter]
   pub fn x(&self) -> u32 {
-    self.x.get()
+    self.x.load(std::sync::atomic::Ordering::SeqCst)
   }
 
   #[fast]
   #[setter]
   pub fn x(&self, x: u32) {
-    self.x.set(x);
+    self.x.store(x, std::sync::atomic::Ordering::SeqCst);
   }
 
   #[nofast]

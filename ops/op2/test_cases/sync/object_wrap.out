@@ -134,7 +134,7 @@ impl Foo {
             #[allow(clippy::too_many_arguments)]
             pub fn call(x: Option<u32>) -> Foo {
                 Foo {
-                    x: Cell::new(x.unwrap_or_default()),
+                    x: AtomicU32::new(x.unwrap_or_default()),
                 }
             }
         }
@@ -240,7 +240,7 @@ impl Foo {
         impl Callable for Foo {
             #[allow(clippy::too_many_arguments)]
             fn call(&self) -> u32 {
-                self.x.get()
+                self.x.load(std::sync::atomic::Ordering::SeqCst)
             }
         }
         <x as ::deno_core::_ops::Op>::DECL
@@ -352,7 +352,7 @@ impl Foo {
         impl Callable for Foo {
             #[allow(clippy::too_many_arguments)]
             fn call(&self, x: u32) {
-                self.x.set(x);
+                self.x.store(x, std::sync::atomic::Ordering::SeqCst);
             }
         }
         <__set_x as ::deno_core::_ops::Op>::DECL
