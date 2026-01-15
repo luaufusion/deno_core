@@ -704,6 +704,7 @@ pub fn host_import_module_with_phase_dynamically_callback<'s, 'i>(
 
   let phase = match phase {
     v8::ModuleImportPhase::kEvaluation => ModuleImportPhase::Evaluation,
+    v8::ModuleImportPhase::kDefer => ModuleImportPhase::Evaluation,
     v8::ModuleImportPhase::kSource => ModuleImportPhase::Source,
   };
 
@@ -1056,12 +1057,9 @@ fn call_console(
   }
 
   let receiver = args.this();
-  let inspector_console_method =
-    v8::Local::<v8::Function>::try_from(args.get(0)).unwrap();
   let deno_console_method =
     v8::Local::<v8::Function>::try_from(args.get(1)).unwrap();
 
-  inspector_console_method.call(scope, receiver.into(), &call_args);
   deno_console_method.call(scope, receiver.into(), &call_args);
 }
 

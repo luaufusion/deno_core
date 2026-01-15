@@ -88,13 +88,11 @@ impl TestData {
 
 pub fn create_runtime_from_snapshot(
   snapshot: &'static [u8],
-  inspector: bool,
   parent: Option<WorkerCloseWatcher>,
   additional_extensions: Vec<Extension>,
 ) -> (JsRuntime, WorkerHostSide) {
   create_runtime_from_snapshot_with_options(
     snapshot,
-    inspector,
     parent,
     additional_extensions,
     RuntimeOptions::default(),
@@ -105,7 +103,6 @@ pub struct Snapshot(&'static [u8]);
 
 pub fn create_runtime_from_snapshot_with_options(
   snapshot: &'static [u8],
-  inspector: bool,
   parent: Option<WorkerCloseWatcher>,
   additional_extensions: Vec<Extension>,
   options: RuntimeOptions,
@@ -124,7 +121,6 @@ pub fn create_runtime_from_snapshot_with_options(
       maybe_transpile_source(specifier, source)
     })),
     shared_array_buffer_store: Some(CrossIsolateStore::default()),
-    inspector,
     import_assertions_support: ImportAssertionsSupport::Warning,
     ..options
   });

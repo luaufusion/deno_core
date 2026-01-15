@@ -11,8 +11,6 @@ use cooked_waker::WakeRef;
 use deno_error::JsErrorBox;
 use parking_lot::Mutex;
 use rstest::rstest;
-use serde_json::Value;
-use serde_json::json;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -425,72 +423,6 @@ fn dangling_shared_isolate() {
 
   // this should not SEGFAULT
   v8_isolate_handle.terminate_execution();
-}
-
-/// Ensure that putting the inspector into OpState doesn't cause crashes. The only valid place we currently allow
-/// the inspector to be stashed without cleanup is the OpState, and this should not actually cause crashes.
-#[test]
-fn inspector() {
-  let mut runtime = JsRuntime::new(RuntimeOptions {
-    inspector: true,
-    ..Default::default()
-  });
-  // This was causing a crash
-  runtime.op_state().borrow_mut().put(runtime.inspector());
-  runtime.execute_script("check.js", "null").unwrap();
-}
-
-#[rstest]
-// https://github.com/denoland/deno/issues/29059
-#[case(0.9999999999999999)]
-#[case(31.245270191439438)]
-#[case(117.63331139400017)]
-#[tokio::test]
-async fn test_preserve_float_precision_from_local_inspector_evaluate(
-  #[case] input: f64,
-) {
-  let mut runtime = JsRuntime::new(RuntimeOptions {
-    inspector: true,
-    ..Default::default()
-  });
-
-  let result = local_inspector_evaluate(&mut runtime, &format!("{}", input));
-
-  assert_eq!(
-    result["result"]["value"],
-    Value::Number(serde_json::Number::from_f64(input).unwrap()),
-  );
-}
-
-fn local_inspector_evaluate(
-  runtime: &mut JsRuntime,
-  expression: &str,
-) -> Value {
-  let kind = inspector::InspectorSessionKind::NonBlocking {
-    wait_for_disconnect: false,
-  };
-
-  let inspector = runtime.inspector();
-  let (tx, rx) = std::sync::mpsc::channel();
-  let callback = Box::new(move |msg: InspectorMsg| {
-    if matches!(msg.kind, InspectorMsgKind::Message(1)) {
-      let value: serde_json::Value =
-        serde_json::from_str(&msg.content).unwrap();
-      let _ = tx.send(value["result"].clone());
-    }
-  });
-  let mut local_inspector_session =
-    JsRuntimeInspector::create_local_session(inspector, callback, kind);
-
-  local_inspector_session.post_message(
-    1,
-    "Runtime.evaluate",
-    Some(json!({
-      "expression": expression,
-    })),
-  );
-
-  rx.try_recv().unwrap()
 }
 
 #[test]

@@ -60,7 +60,6 @@ fn create_runtime() -> JsRuntime {
 
   create_runtime_from_snapshot(
     snapshot,
-    false,
     None,
     vec![checkin_testing::init()],
   )

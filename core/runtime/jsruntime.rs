@@ -39,7 +39,6 @@ use crate::extension_set;
 use crate::extension_set::LoadedSources;
 use crate::extensions::GlobalObjectMiddlewareFn;
 use crate::extensions::GlobalTemplateMiddlewareFn;
-use crate::inspector::JsRuntimeInspector;
 use crate::module_specifier::ModuleSpecifier;
 use crate::modules::CustomModuleEvaluationCb;
 use crate::modules::EvalContextCodeCacheReadyCb;
@@ -89,7 +88,6 @@ use std::task::Context;
 use std::task::Poll;
 use std::task::Waker;
 
-pub type WaitForInspectorDisconnectCallback = Box<dyn Fn()>;
 const STATE_DATA_OFFSET: u32 = 0;
 
 pub type ExtensionTranspiler =
@@ -155,22 +153,12 @@ pub(crate) struct InnerIsolateState {
 }
 
 impl InnerIsolateState {
-  /// Clean out the opstate and take the inspector to prevent the inspector from getting destroyed
-  /// after we've torn down the contexts. If the inspector is not correctly torn down, random crashes
-  /// happen in tests (and possibly for users using the inspector).
+  /// Clean out the opstate
   pub fn prepare_for_cleanup(&mut self) {
     // Explicitly shut down the op driver here, just in case there are other references to it
     // that prevent it from dropping after we invalidate the state.
     self.main_realm.0.context_state.pending_ops.shutdown();
-    let inspector = self.state.inspector.take();
     self.state.op_state.borrow_mut().clear();
-    if let Some(inspector) = inspector {
-      assert_eq!(
-        Rc::strong_count(&inspector),
-        1,
-        "The inspector must be dropped before the runtime"
-      );
-    }
   }
 
   pub fn cleanup(&mut self) {
@@ -348,8 +336,6 @@ pub struct JsRuntime {
   // [`JsRuntime::init_extension_js`]. This field is populated only if a
   // snapshot is being created.
   files_loaded_from_fs_during_snapshot: Vec<&'static str>,
-  // Marks if this is considered the top-level runtime. Used only by inspector.
-  is_main_runtime: bool,
 }
 
 /// The runtime type used for snapshot creation.
@@ -418,8 +404,6 @@ pub struct JsRuntimeState {
   pub(crate) op_state: Rc<RefCell<OpState>>,
   pub(crate) shared_array_buffer_store: Option<SharedArrayBufferStore>,
   pub(crate) compiled_wasm_module_store: Option<CompiledWasmModuleStore>,
-  wait_for_inspector_disconnect_callback:
-    Option<WaitForInspectorDisconnectCallback>,
   pub(crate) validate_import_attributes_cb: Option<ValidateImportAttributesCb>,
   pub(crate) custom_module_evaluation_cb: Option<CustomModuleEvaluationCb>,
   pub(crate) eval_context_get_code_cache_cb:
@@ -430,9 +414,6 @@ pub struct JsRuntimeState {
   pub(crate) function_templates: Rc<RefCell<FunctionTemplateData>>,
   pub(crate) callsite_prototype: RefCell<Option<v8::Global<v8::Object>>>,
   waker: Arc<AtomicWaker>,
-  /// Accessed through [`JsRuntimeState::with_inspector`].
-  inspector: RefCell<Option<Rc<JsRuntimeInspector>>>,
-  has_inspector: Cell<bool>,
   import_assertions_support: ImportAssertionsSupport,
   lazy_extensions: Vec<&'static str>,
 }
@@ -496,9 +477,6 @@ pub struct RuntimeOptions {
   /// `WebAssembly.Module` objects cannot be serialized.
   pub compiled_wasm_module_store: Option<CompiledWasmModuleStore>,
 
-  /// Start inspector instance to allow debuggers to connect.
-  pub inspector: bool,
-
   /// Describe if this is the main runtime instance, used by debuggers in some
   /// situation - like disconnecting when program finishes running.
   pub is_main: bool,
@@ -518,15 +496,6 @@ pub struct RuntimeOptions {
   /// To signal validation failure, users should throw an V8 exception inside
   /// the callback.
   pub validate_import_attributes_cb: Option<ValidateImportAttributesCb>,
-
-  /// A callback that is called when the event loop has no more work to do,
-  /// but there are active, non-blocking inspector session (eg. Chrome
-  /// DevTools inspector is connected). The embedder can use this callback
-  /// to eg. print a message notifying user about program finished running.
-  /// This callback can be called multiple times, eg. after the program finishes
-  /// more work can be scheduled from the DevTools.
-  pub wait_for_inspector_disconnect_callback:
-    Option<WaitForInspectorDisconnectCallback>,
 
   /// A callback that allows to evaluate a custom type of a module - eg.
   /// embedders might implement loading WASM or test modules.
@@ -664,14 +633,12 @@ impl RuntimeOptions {
 
 #[derive(Copy, Clone, Debug)]
 pub struct PollEventLoopOptions {
-  pub wait_for_inspector: bool,
   pub pump_v8_message_loop: bool,
 }
 
 impl Default for PollEventLoopOptions {
   fn default() -> Self {
     Self {
-      wait_for_inspector: false,
       pump_v8_message_loop: true,
     }
   }
@@ -859,8 +826,6 @@ impl JsRuntime {
       source_mapper: Rc::new(RefCell::new(source_mapper)),
       shared_array_buffer_store: options.shared_array_buffer_store,
       compiled_wasm_module_store: options.compiled_wasm_module_store,
-      wait_for_inspector_disconnect_callback: options
-        .wait_for_inspector_disconnect_callback,
       op_state: op_state.clone(),
       validate_import_attributes_cb: options.validate_import_attributes_cb,
       custom_module_evaluation_cb: options.custom_module_evaluation_cb,
@@ -872,8 +837,6 @@ impl JsRuntime {
       ),
       waker,
       // Some fields are initialized later after isolate is created
-      inspector: None.into(),
-      has_inspector: false.into(),
       cppgc_template: None.into(),
       function_templates: Default::default(),
       callsite_prototype: None.into(),
@@ -1052,17 +1015,6 @@ impl JsRuntime {
         );
       }
 
-      let inspector = if options.inspector {
-        Some(JsRuntimeInspector::new(
-          isolate_ptr,
-          scope,
-          context,
-          options.is_main,
-        ))
-      } else {
-        None
-      };
-
       // ...now that JavaScript bindings to ops are available we can deserialize
       // modules stored in the snapshot (because they depend on the ops and external
       // references must match properly) and recreate a module map...
@@ -1133,9 +1085,6 @@ impl JsRuntime {
           module_map.clone(),
           state_rc.function_templates.clone(),
         );
-        // TODO(bartlomieju): why is this done in here? Maybe we can hoist it out?
-        state_rc.has_inspector.set(inspector.is_some());
-        *state_rc.inspector.borrow_mut() = inspector;
         main_realm
       };
       let main_realm = JsRealm::new(main_realm);
@@ -1160,7 +1109,6 @@ impl JsRuntime {
       },
       allocations: isolate_allocations,
       files_loaded_from_fs_during_snapshot: vec![],
-      is_main_runtime: options.is_main,
     };
 
     // ...we're almost done with the setup, all that's left is to execute
@@ -1300,23 +1248,6 @@ impl JsRuntime {
   #[inline]
   fn v8_isolate_ptr(&mut self) -> v8::UnsafeRawIsolatePtr {
     unsafe { self.inner.v8_isolate.as_raw_isolate_ptr() }
-  }
-
-  #[inline]
-  pub fn inspector(&self) -> Rc<JsRuntimeInspector> {
-    self.inner.state.inspector()
-  }
-
-  #[inline]
-  pub fn wait_for_inspector_disconnect(&self) {
-    if let Some(callback) = self
-      .inner
-      .state
-      .wait_for_inspector_disconnect_callback
-      .as_ref()
-    {
-      callback();
-    }
   }
 
   pub fn runtime_activity_stats_factory(&self) -> RuntimeActivityStatsFactory {
@@ -1855,30 +1786,6 @@ impl JsRuntime {
     }
   }
 
-  pub fn maybe_init_inspector(&mut self) {
-    let inspector = &mut self.inner.state.inspector.borrow_mut();
-    if inspector.is_some() {
-      return;
-    }
-
-    let context = self.main_context();
-    let isolate_ptr = unsafe { self.inner.v8_isolate.as_raw_isolate_ptr() };
-    v8::scope_with_context!(
-      scope,
-      self.inner.v8_isolate.as_mut(),
-      context.clone(),
-    );
-    let context = v8::Local::new(scope, context);
-
-    self.inner.state.has_inspector.set(true);
-    **inspector = Some(JsRuntimeInspector::new(
-      isolate_ptr,
-      scope,
-      context,
-      self.is_main_runtime,
-    ));
-  }
-
   /// Waits for the given value to resolve while polling the event loop.
   ///
   /// This future resolves when either the value is resolved or the event loop runs to
@@ -1950,8 +1857,6 @@ impl JsRuntime {
   /// This future resolves when:
   ///  - there are no more pending dynamic imports
   ///  - there are no more pending ops
-  ///  - there are no more active inspector sessions (only if
-  ///    `PollEventLoopOptions.wait_for_inspector` is set to true)
   pub async fn run_event_loop(
     &mut self,
     poll_options: PollEventLoopOptions,
@@ -1994,8 +1899,6 @@ impl JsRuntime {
   ///
   /// If the event loop resolves while polling the future, it will continue to be polled,
   /// regardless of whether it returned an error or success.
-  ///
-  /// Useful for interacting with local inspector session.
   pub async fn with_event_loop_future<'fut, T, E>(
     &mut self,
     mut fut: impl Future<Output = Result<T, E>> + Unpin + 'fut,
@@ -2018,9 +1921,6 @@ impl JsRuntime {
   }
 
   /// Runs a single tick of event loop
-  ///
-  /// If `PollEventLoopOptions.wait_for_inspector` is set to true, the event
-  /// loop will return `Poll::Pending` if there are active inspector sessions.
   pub fn poll_event_loop(
     &mut self,
     cx: &mut Context,
@@ -2042,13 +1942,7 @@ impl JsRuntime {
     scope: &mut v8::PinScope,
     poll_options: PollEventLoopOptions,
   ) -> Poll<Result<(), CoreError>> {
-    let has_inspector = self.inner.state.has_inspector.get();
     self.inner.state.waker.register(cx.waker());
-
-    if has_inspector {
-      // We poll the inspector first.
-      self.inspector().poll_sessions_from_event_loop(cx);
-    }
 
     if poll_options.pump_v8_message_loop {
       self.pump_v8_message_loop(scope)?;
@@ -2078,24 +1972,6 @@ impl JsRuntime {
       EventLoopPendingState::new(scope, context_state, modules);
 
     if !pending_state.is_pending() {
-      if has_inspector {
-        let inspector = self.inspector();
-        let sessions_state = inspector.sessions_state();
-
-        if poll_options.wait_for_inspector && sessions_state.has_active {
-          if sessions_state.has_blocking {
-            return Poll::Pending;
-          }
-
-          if sessions_state.has_nonblocking_wait_for_disconnect {
-            let context = self.main_context();
-            inspector.context_destroyed(scope, context);
-            self.wait_for_inspector_disconnect();
-            return Poll::Pending;
-          }
-        }
-      }
-
       return Poll::Ready(Ok(()));
     }
 
@@ -2268,7 +2144,6 @@ impl JsRuntimeForSnapshot {
   ///
   /// `Error` can usually be downcast to `JsError`.
   pub fn snapshot(mut self) -> Box<[u8]> {
-    // Ensure there are no live inspectors to prevent crashes.
     self.inner.prepare_for_cleanup();
     let original_sources =
       std::mem::take(&mut self.0.allocations.original_sources);
@@ -2469,31 +2344,11 @@ where
 }
 
 impl JsRuntimeState {
-  pub(crate) fn inspector(&self) -> Rc<JsRuntimeInspector> {
-    self.inspector.borrow().as_ref().unwrap().clone()
-  }
-
   /// Called by `bindings::host_import_module_dynamically_callback`
   /// after initiating new dynamic import load.
   pub fn notify_new_dynamic_import(&self) {
     // Notify event loop to poll again soon.
     self.waker.wake();
-  }
-
-  /// Performs an action with the inspector, if we have one
-  pub(crate) fn with_inspector<T>(
-    &self,
-    mut f: impl FnMut(&JsRuntimeInspector) -> T,
-  ) -> Option<T> {
-    // Fast path
-    if !self.has_inspector.get() {
-      return None;
-    }
-    self
-      .inspector
-      .borrow()
-      .as_ref()
-      .map(|inspector| f(inspector))
   }
 }
 

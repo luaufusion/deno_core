@@ -115,7 +115,6 @@ pub fn op_worker_spawn(
   std::thread::spawn(move || {
     let (mut runtime, worker_host_side) = create_runtime_from_snapshot(
       snapshot,
-      false,
       Some(close_watcher),
       vec![],
     );
